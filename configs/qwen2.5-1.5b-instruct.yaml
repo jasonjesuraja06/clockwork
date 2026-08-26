@@ -1,0 +1,17 @@
+model:
+  model: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: float32
+  device: cpu
+  max_model_len: 4096
+  seed: 0
+cache:
+  block_size: 16
+  num_blocks: 512
+  enable_prefix_cache: true
+  watermark: 0.01
+scheduler:
+  max_num_seqs: 64
+  max_num_batched_tokens: 2048
+  max_model_len: 4096
+  preemption_mode: recompute
+attention_backend: auto
