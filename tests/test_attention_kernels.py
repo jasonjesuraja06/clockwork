@@ -145,6 +145,51 @@ def test_naive_attention_mha_matches_sdpa(seed_all):
     torch.testing.assert_close(out, ref, atol=1e-5, rtol=1e-5)
 
 
+def test_gqa_explicit_per_head_mapping(seed_all):
+    # Reference computed with plain loops so it shares no head-repeat helper
+    # with the kernels: query head h must read kv head h // group. The kv heads
+    # get large distinct offsets so any other mapping lands far outside
+    # tolerance instead of passing by luck.
+    ctx_len = 11
+    group = NUM_HEADS // NUM_KV_HEADS
+    q = torch.randn(ctx_len, NUM_HEADS, HEAD_DIM)
+    k = torch.randn(ctx_len, NUM_KV_HEADS, HEAD_DIM)
+    v = torch.randn(ctx_len, NUM_KV_HEADS, HEAD_DIM)
+    for kv_h in range(NUM_KV_HEADS):
+        k[:, kv_h] += 3.0 * (kv_h + 1)
+        v[:, kv_h] += 10.0 * (kv_h + 1)
+
+    expected = torch.zeros(ctx_len, NUM_HEADS, HEAD_DIM)
+    for h in range(NUM_HEADS):
+        kv_h = h // group
+        for i in range(ctx_len):
+            scores = torch.stack([torch.dot(q[i, h], k[j, kv_h]) * SCALE for j in range(i + 1)])
+            probs = torch.softmax(scores, dim=0)
+            out = torch.zeros(HEAD_DIM)
+            for j in range(i + 1):
+                out = out + probs[j] * v[j, kv_h]
+            expected[i, h] = out
+
+    out_naive = naive_attention(q, k, v, SCALE, causal=True)
+    torch.testing.assert_close(out_naive, expected, atol=1e-4, rtol=1e-5)
+
+    block_table = [4, 10, 2]
+    k_cache, v_cache = empty_cache()
+    write_to_cache(k_cache, v_cache, block_table, k, v)
+    out_prefill = paged_attention_prefill(q, k_cache, v_cache, block_table, ctx_len, SCALE)
+    torch.testing.assert_close(out_prefill, expected, atol=1e-4, rtol=1e-5)
+
+    out_decode = paged_attention_decode(
+        q[-1:],
+        k_cache,
+        v_cache,
+        torch.tensor([block_table], dtype=torch.int32),
+        torch.tensor([ctx_len], dtype=torch.int32),
+        SCALE,
+    )
+    torch.testing.assert_close(out_decode, expected[-1:], atol=1e-4, rtol=1e-5)
+
+
 def test_resolve_backend():
     assert resolve_backend("torch") == "torch"
     with pytest.raises(ValueError):
