@@ -1,0 +1,55 @@
+[project]
+name = "clockwork"
+version = "0.1.0"
+description = "Agent-optimized LLM inference engine with continuous batching, a paged KV cache, and a radix prefix cache."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "jasonjesuraja06" }]
+dependencies = [
+    "torch>=2.4",
+    "transformers>=4.44",
+    "safetensors>=0.4",
+    "numpy>=1.26",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.8",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+# Triton has no macOS wheels. Install this extra on a CUDA host to enable the
+# Triton paged-attention backend.
+gpu = ["triton>=3.0"]
+
+[project.scripts]
+clockwork-serve = "clockwork.server.app:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["clockwork"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008", "E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: downloads or runs the real model; excluded from CI",
+    "gpu: requires a CUDA device and Triton",
+]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,19 @@
+private/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store
+
+# model weights and run artifacts
+models/
+weights/
+*.safetensors
+*.bin
+*.gguf
+runs/
+bench_out/
+data/sharegpt*.json
