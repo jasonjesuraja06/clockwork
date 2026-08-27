@@ -134,7 +134,12 @@ async def _fetch_model_id(client: httpx.AsyncClient) -> str:
 
 
 async def _drive(
-    client: httpx.AsyncClient, request: BenchRequest, model: str, t0: float, record: _Record
+    client: httpx.AsyncClient,
+    request: BenchRequest,
+    model: str,
+    t0: float,
+    record: _Record,
+    ignore_eos: bool = False,
 ) -> None:
     delay = request.arrival_time - (time.perf_counter() - t0)
     if delay > 0:
@@ -148,6 +153,8 @@ async def _drive(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if ignore_eos:
+        payload["ignore_eos"] = True
     if request.messages is not None:
         path = "/v1/chat/completions"
         payload["messages"] = request.messages
@@ -231,6 +238,7 @@ async def run(
     out_dir: str | Path,
     tokenizer=None,
     client: httpx.AsyncClient | None = None,
+    ignore_eos: bool = False,
 ) -> Path:
     """Run one workload against an OpenAI-compatible server and write its CSVs."""
     if tokenizer is None:
@@ -248,7 +256,10 @@ async def run(
         sampler.start()
         t0 = time.perf_counter()
         await asyncio.gather(
-            *(_drive(client, record.request, model, t0, record) for record in records)
+            *(
+                _drive(client, record.request, model, t0, record, ignore_eos=ignore_eos)
+                for record in records
+            )
         )
         gpu_mean, gpu_max = await sampler.stop()
     finally:

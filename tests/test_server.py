@@ -394,3 +394,19 @@ async def test_prompt_over_admission_budget_returns_400(tiny):
     assert too_long.status_code == 400
     assert "max_num_batched_tokens" in too_long.json()["error"]["message"]
     assert fits.status_code == 200
+
+
+async def test_ignore_eos_generates_exactly_max_tokens(tiny):
+    async with serve(tiny) as client:
+        resp = await client.post(
+            "/v1/completions",
+            json={
+                "model": MODEL,
+                "prompt": list(range(1, 7)),
+                "max_tokens": 4,
+                "ignore_eos": True,
+                "temperature": 0.0,
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.json()["usage"]["completion_tokens"] == 4

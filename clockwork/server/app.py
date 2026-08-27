@@ -36,6 +36,7 @@ def _sampling_params(
         top_p=req.top_p,
         stop=list(stop),
         seed=req.seed,
+        ignore_eos=req.ignore_eos,
     )
 
 

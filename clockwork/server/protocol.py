@@ -33,6 +33,7 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     stop: str | list[str] | None = None
     seed: int | None = None
+    ignore_eos: bool = False
 
 
 class CompletionRequest(BaseModel):
@@ -45,6 +46,7 @@ class CompletionRequest(BaseModel):
     stream: bool = False
     stop: str | list[str] | None = None
     seed: int | None = None
+    ignore_eos: bool = False
 
 
 class PromptTokensDetails(BaseModel):

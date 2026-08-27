@@ -66,6 +66,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--num-requests", type=int, default=None, help="override per workload")
     parser.add_argument("--max-tokens", type=int, default=None, help="override per workload")
+    parser.add_argument(
+        "--ignore-eos", action="store_true", help="force generation to run to max_tokens"
+    )
     parser.add_argument("--plots", default=None, help="also render figures into this directory")
     args = parser.parse_args(argv)
 
@@ -80,7 +83,9 @@ def main(argv: list[str] | None = None) -> None:
     for cfg in workloads:
         if overrides:
             cfg = dataclasses.replace(cfg, **overrides)
-        csv_path = asyncio.run(runner.run(cfg, args.base_url, out_dir, tokenizer=tokenizer))
+        csv_path = asyncio.run(
+            runner.run(cfg, args.base_url, out_dir, tokenizer=tokenizer, ignore_eos=args.ignore_eos)
+        )
         print(f"{cfg.name}: wrote {csv_path}")
     summary_path = out_dir / "summary.csv"
     print(f"summary: {summary_path}")
