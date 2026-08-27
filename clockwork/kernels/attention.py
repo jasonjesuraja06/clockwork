@@ -2,12 +2,13 @@
 
 import torch
 
-from clockwork.kernels.triton_paged_attn import HAS_TRITON
+from clockwork.kernels.triton_paged_attn import HAS_TRITON, triton_paged_attention_decode
 
 __all__ = [
     "HAS_TRITON",
     "naive_attention",
     "paged_attention_decode",
+    "paged_attention_decode_torch",
     "paged_attention_prefill",
     "resolve_backend",
 ]
@@ -104,6 +105,20 @@ def paged_attention_decode(
     scale: float,
 ) -> torch.Tensor:
     """Single-token decode attention over a paged cache for a batch of sequences."""
+    if q.is_cuda and resolve_backend("auto") == "triton":
+        return triton_paged_attention_decode(q, k_cache, v_cache, block_tables, ctx_lens, scale)
+    return paged_attention_decode_torch(q, k_cache, v_cache, block_tables, ctx_lens, scale)
+
+
+def paged_attention_decode_torch(
+    q: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    block_tables: torch.Tensor,
+    ctx_lens: torch.Tensor,
+    scale: float,
+) -> torch.Tensor:
+    """Torch decode path; also the correctness reference for the Triton kernel."""
     batch, num_heads, head_dim = q.shape
     block_size, num_kv_heads = k_cache.shape[1], k_cache.shape[2]
     tables = block_tables.to(torch.long)
