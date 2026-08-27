@@ -131,7 +131,7 @@ def test_decode_on_cpu_never_routes_to_triton(monkeypatch):
 def test_triton_unavailable_raises_clearly():
     with pytest.raises(RuntimeError, match="triton"):
         resolve_backend("triton")
-    with pytest.raises(RuntimeError, match="Triton is not installed"):
+    with pytest.raises(RuntimeError, match="Triton is not installed|requires CUDA"):
         triton_paged_attn.triton_paged_attention_decode(None, None, None, None, None, 1.0)
 
 

@@ -112,7 +112,7 @@ def triton_paged_attention_decode(q, k_cache, v_cache, block_tables, ctx_lens, s
         raise RuntimeError(
             "Triton is not installed; use resolve_backend('torch') and paged_attention_decode"
         )
-    if not q.is_cuda:
+    if q is None or not q.is_cuda:
         raise RuntimeError("the Triton decode kernel requires CUDA tensors")
     batch, num_heads, head_dim = q.shape
     block_size, num_kv_heads = k_cache.shape[1], k_cache.shape[2]
