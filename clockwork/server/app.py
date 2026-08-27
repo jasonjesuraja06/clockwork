@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from clockwork.config import EngineConfig
 from clockwork.engine.async_engine import AsyncLLMEngine
 from clockwork.engine.sequence import RequestOutput, SamplingParams
 from clockwork.server import protocol
+from clockwork.server.metrics import ServerMetrics
 
 _DEFAULT_MAX_TOKENS = 16
 
@@ -73,6 +75,27 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
 
     app = FastAPI(title="clockwork", lifespan=lifespan)
     served_model = cfg.model.model
+    metrics = ServerMetrics()
+
+    @app.middleware("http")
+    async def count_requests(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/v1/"):
+            metrics.observe_request(request.url.path, response.status_code)
+        return response
+
+    async def instrumented(request_id, prompt_ids, params, t0):
+        # Wraps engine output to record TTFT at the first generated token and
+        # duration plus token counters when the request finishes.
+        running: AsyncLLMEngine = app.state.engine
+        seen_first = False
+        async for out in running.generate(request_id, prompt_ids, params):
+            if not seen_first and out.num_generated_tokens > 0:
+                seen_first = True
+                metrics.ttft.observe(time.perf_counter() - t0)
+            yield out
+            if out.finished:
+                metrics.observe_output(out, time.perf_counter() - t0)
 
     def bad_request(
         req: protocol.ChatCompletionRequest | protocol.CompletionRequest,
@@ -104,11 +127,10 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
         return None
 
     async def aggregate(
-        raw: Request, request_id: str, prompt_ids: list[int], params: SamplingParams
+        raw: Request, request_id: str, prompt_ids: list[int], params: SamplingParams, t0: float
     ) -> RequestOutput | None:
-        running: AsyncLLMEngine = app.state.engine
         final = None
-        async for out in running.generate(request_id, prompt_ids, params):
+        async for out in instrumented(request_id, prompt_ids, params, t0):
             final = out
             # Leaving the stream before it finishes aborts the request in the engine.
             if not out.finished and await raw.is_disconnected():
@@ -117,6 +139,7 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
 
     @app.post("/v1/chat/completions")
     async def chat_completions(req: protocol.ChatCompletionRequest, raw: Request):
+        t0 = time.perf_counter()
         err = bad_request(req)
         if err is not None:
             return err
@@ -131,11 +154,11 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
         request_id = protocol.random_id("chatcmpl")
         if req.stream:
             return StreamingResponse(
-                chat_stream(request_id, prompt_ids, params, req.model),
+                chat_stream(request_id, prompt_ids, params, req.model, t0),
                 media_type="text/event-stream",
             )
         try:
-            final = await aggregate(raw, request_id, prompt_ids, params)
+            final = await aggregate(raw, request_id, prompt_ids, params, t0)
         except ValueError as exc:
             return _error(400, str(exc))
         if final is None:
@@ -153,9 +176,8 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
         )
 
     async def chat_stream(
-        request_id: str, prompt_ids: list[int], params: SamplingParams, model: str
+        request_id: str, prompt_ids: list[int], params: SamplingParams, model: str, t0: float
     ) -> AsyncIterator[str]:
-        running: AsyncLLMEngine = app.state.engine
         created = protocol.now()
 
         def send(delta: protocol.DeltaMessage, finish_reason=None, usage=None) -> str:
@@ -172,7 +194,7 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
 
         yield send(protocol.DeltaMessage(role="assistant", content=""))
         final = None
-        async for out in running.generate(request_id, prompt_ids, params):
+        async for out in instrumented(request_id, prompt_ids, params, t0):
             final = out
             if out.delta_text:
                 yield send(protocol.DeltaMessage(content=out.delta_text))
@@ -184,6 +206,7 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
 
     @app.post("/v1/completions")
     async def completions(req: protocol.CompletionRequest, raw: Request):
+        t0 = time.perf_counter()
         err = bad_request(req)
         if err is not None:
             return err
@@ -199,11 +222,11 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
         request_id = protocol.random_id("cmpl")
         if req.stream:
             return StreamingResponse(
-                completion_stream(request_id, prompt_ids, params, req.model),
+                completion_stream(request_id, prompt_ids, params, req.model, t0),
                 media_type="text/event-stream",
             )
         try:
-            final = await aggregate(raw, request_id, prompt_ids, params)
+            final = await aggregate(raw, request_id, prompt_ids, params, t0)
         except ValueError as exc:
             return _error(400, str(exc))
         if final is None:
@@ -216,9 +239,8 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
         )
 
     async def completion_stream(
-        request_id: str, prompt_ids: list[int], params: SamplingParams, model: str
+        request_id: str, prompt_ids: list[int], params: SamplingParams, model: str, t0: float
     ) -> AsyncIterator[str]:
-        running: AsyncLLMEngine = app.state.engine
         created = protocol.now()
 
         def send(text: str, finish_reason=None, usage=None) -> str:
@@ -232,7 +254,7 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
             return f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 
         final = None
-        async for out in running.generate(request_id, prompt_ids, params):
+        async for out in instrumented(request_id, prompt_ids, params, t0):
             final = out
             if out.delta_text:
                 yield send(out.delta_text)
@@ -248,14 +270,30 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
     async def health():
         return {"status": "ok"}
 
-    @app.get("/metrics")
-    async def metrics():
+    @app.get("/stats")
+    async def stats():
         running: AsyncLLMEngine = app.state.engine
         return {
             "model": served_model,
             "attention_backend": running.engine.runner.attention_backend,
             **running.engine.stats(),
         }
+
+    @app.get("/metrics")
+    async def prometheus_metrics():
+        running: AsyncLLMEngine = app.state.engine
+        gauges = {
+            key: value
+            for key, value in running.engine.stats().items()
+            if isinstance(value, (int, float))
+        }
+        info = {
+            "model": served_model,
+            "attention_backend": running.engine.runner.attention_backend,
+        }
+        return PlainTextResponse(
+            metrics.render(gauges, info), media_type="text/plain; version=0.0.4"
+        )
 
     return app
 

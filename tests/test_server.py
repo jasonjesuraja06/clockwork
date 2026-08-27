@@ -287,7 +287,7 @@ async def test_usage_reports_cached_tokens_on_repeat(tiny):
     async with serve(tiny) as client:
         first = await client.post("/v1/chat/completions", json=payload)
         second = await client.post("/v1/chat/completions", json=payload)
-        metrics = (await client.get("/metrics")).json()
+        metrics = (await client.get("/stats")).json()
     body1 = first.json()
     body2 = second.json()
     assert body1["usage"]["prompt_tokens"] == 16
@@ -324,7 +324,7 @@ async def test_health_models_and_metrics_shape(tiny):
     async with serve(tiny) as client:
         health = await client.get("/health")
         models = await client.get("/v1/models")
-        metrics = await client.get("/metrics")
+        metrics = await client.get("/stats")
     assert health.status_code == 200
     assert health.json() == {"status": "ok"}
 
@@ -410,3 +410,35 @@ async def test_ignore_eos_generates_exactly_max_tokens(tiny):
         )
     assert resp.status_code == 200
     assert resp.json()["usage"]["completion_tokens"] == 4
+
+
+async def test_prometheus_metrics_endpoint(tiny):
+    async with serve(tiny) as client:
+        ok = await client.post(
+            "/v1/completions",
+            json={"model": MODEL, "prompt": list(range(1, 7)), "max_tokens": 4},
+        )
+        bad = await client.post(
+            "/v1/completions", json={"model": "gpt-4", "prompt": [1, 2], "max_tokens": 1}
+        )
+        resp = await client.get("/metrics")
+    assert ok.status_code == 200 and bad.status_code == 400
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    text = resp.text
+    assert "# TYPE clockwork_requests_total counter" in text
+    assert 'clockwork_requests_total{endpoint="/v1/completions",status="200"} 1' in text
+    assert 'clockwork_requests_total{endpoint="/v1/completions",status="400"} 1' in text
+    assert "clockwork_generated_tokens_total 4" in text
+    assert "clockwork_prompt_tokens_total 6" in text
+    assert "clockwork_ttft_seconds_count 1" in text
+    assert "clockwork_request_duration_seconds_count 1" in text
+    assert 'clockwork_ttft_seconds_bucket{le="+Inf"} 1' in text
+    assert "# TYPE clockwork_engine_num_free_blocks gauge" in text
+    assert f'clockwork_build_info{{attention_backend="torch",model="{MODEL}"}} 1' in text
+    ttft_sum = next(
+        float(line.rsplit(" ", 1)[1])
+        for line in text.splitlines()
+        if line.startswith("clockwork_ttft_seconds_sum")
+    )
+    assert ttft_sum > 0
