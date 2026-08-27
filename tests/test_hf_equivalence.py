@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 
 import pytest
@@ -172,14 +173,13 @@ def test_half_precision_cast_keeps_inv_freq_float32():
 
 @pytest.mark.slow
 def test_real_model_greedy_exact_match():
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from clockwork.config import ModelConfig
     from clockwork.engine.loader import load_model
 
-    cfg = ModelConfig(model=REAL_MODEL, dtype="float32", device="cpu")
     try:
-        model, _, tokenizer = load_model(cfg)
+        tokenizer = AutoTokenizer.from_pretrained(REAL_MODEL)
         hf_model = AutoModelForCausalLM.from_pretrained(REAL_MODEL, dtype=torch.float32)
     except Exception as exc:
         if os.environ.get("HF_HUB_OFFLINE", "0") not in ("", "0"):
@@ -202,9 +202,16 @@ def test_real_model_greedy_exact_match():
     for i in range(len(prompts)):
         for j in range(i + 1, len(prompts)):
             assert prompts[i] != prompts[j]
-    for prompt in prompts:
+    # Reference outputs first, then free the HF copy: two fp32 copies of the 1.5B
+    # model exceed the 12.7 GB RAM of a free Colab host and draw the OOM killer.
+    references = [_hf_greedy(hf_model, prompt, 16) for prompt in prompts]
+    del hf_model
+    gc.collect()
+
+    cfg = ModelConfig(model=REAL_MODEL, dtype="float32", device="cpu")
+    model, _, _ = load_model(cfg)
+    for prompt, theirs in zip(prompts, references, strict=True):
         ours = _greedy(model, prompt, 16)
-        theirs = _hf_greedy(hf_model, prompt, 16)
         assert len(ours) == 16
         assert ours == theirs, (
             f"greedy divergence on {tokenizer.decode(prompt)!r}: ours={ours} hf={theirs}"
