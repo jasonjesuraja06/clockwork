@@ -91,6 +91,15 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
                 f"prompt of {len(prompt_ids)} tokens leaves no room to generate "
                 f"within max_model_len {cfg.model.max_model_len}",
             )
+        # Prefill is per sequence without chunking, so a prompt above the batched
+        # token budget could never be admitted and would otherwise hang or return
+        # an empty completion.
+        if len(prompt_ids) > cfg.scheduler.max_num_batched_tokens:
+            return _error(
+                400,
+                f"prompt of {len(prompt_ids)} tokens exceeds the prefill admission "
+                f"budget max_num_batched_tokens {cfg.scheduler.max_num_batched_tokens}",
+            )
         return None
 
     async def aggregate(

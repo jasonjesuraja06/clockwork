@@ -379,3 +379,18 @@ async def test_bad_model_and_n_return_400(tiny):
         assert error["message"]
     assert works_after.status_code == 200
     assert works_after.json()["usage"]["completion_tokens"] == 2
+
+
+async def test_prompt_over_admission_budget_returns_400(tiny):
+    async with serve(tiny, max_num_batched_tokens=8) as client:
+        too_long = await client.post(
+            "/v1/completions",
+            json={"model": MODEL, "prompt": list(range(1, 13)), "max_tokens": 2},
+        )
+        fits = await client.post(
+            "/v1/completions",
+            json={"model": MODEL, "prompt": list(range(1, 7)), "max_tokens": 2},
+        )
+    assert too_long.status_code == 400
+    assert "max_num_batched_tokens" in too_long.json()["error"]["message"]
+    assert fits.status_code == 200

@@ -11,7 +11,7 @@ cache:
   watermark: 0.01
 scheduler:
   max_num_seqs: 64
-  max_num_batched_tokens: 2048
+  max_num_batched_tokens: 4096
   max_model_len: 4096
   preemption_mode: recompute
 attention_backend: auto
