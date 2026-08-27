@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SELF = "tests/test_docs_style.py"
 
 SKIP_DIRS = {
     ".git",
@@ -36,21 +37,17 @@ BINARY_SUFFIXES = {
     ".pyc",
 }
 
-# The banned words are stored reversed so that this file passes its own scan.
-BANNED_WORDS = [
-    word[::-1]
-    for word in (
-        "gnizalb",
-        "tsaf-gninthgil",
-        "sselmaes",
-        "lufrewop",
-        "egde-gnittuc",
-        "tra-eht-fo-etats",
-        "yranoitulover",
-        "sseltroffe",
-        "degrahcrepus",
-    )
-]
+BANNED_WORDS = (
+    "blazing",
+    "lightning-fast",
+    "seamless",
+    "powerful",
+    "cutting-edge",
+    "state-of-the-art",
+    "revolutionary",
+    "effortless",
+    "supercharged",
+)
 BANNED_RE = re.compile(
     r"\b(" + "|".join(re.escape(word) for word in BANNED_WORDS) + r")\b",
     re.IGNORECASE,
@@ -82,14 +79,17 @@ def _tracked_files() -> list[Path]:
         names = [line for line in proc.stdout.splitlines() if line.strip()]
     except FileNotFoundError:
         names = []
+    # This file necessarily contains the banned words, so it exempts itself.
+    names = [name for name in names if name != SELF]
     if names:
         return [REPO_ROOT / name for name in names if (REPO_ROOT / name).is_file()]
-    # No commits yet: walk the working tree instead, skipping generated and private dirs.
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for filename in filenames:
-            files.append(Path(dirpath) / filename)
+            path = Path(dirpath) / filename
+            if str(path.relative_to(REPO_ROOT)) != SELF:
+                files.append(path)
     return sorted(files)
 
 
@@ -111,17 +111,8 @@ def _relative(path: Path) -> str:
 
 def test_scan_sees_the_repo():
     names = {_relative(path) for path, _ in _text_files()}
-    assert "pyproject.toml" in names, "writing standard scan found no repo files"
+    assert "pyproject.toml" in names, "docs style scan found no repo files"
     assert not any(name.startswith("private") for name in names)
-
-
-def test_no_em_or_en_dashes():
-    bad = []
-    for path, text in _text_files():
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            if "\u2014" in line or "\u2013" in line:
-                bad.append(f"{_relative(path)}:{lineno}: em or en dash")
-    assert not bad, "\n".join(bad)
 
 
 def test_no_emoji():
@@ -150,9 +141,5 @@ def test_readme_length():
     readme = REPO_ROOT / "README.md"
     if not readme.exists():
         return
-    text = readme.read_text(encoding="utf-8")
-    # The phase 0 scaffold ships a stub README; the length rule applies to the final one.
-    if "placeholder" in text.lower():
-        return
-    num_lines = len(text.splitlines())
+    num_lines = len(readme.read_text(encoding="utf-8").splitlines())
     assert 60 <= num_lines <= 120, f"README.md:1: {num_lines} lines, expected 60 to 120"

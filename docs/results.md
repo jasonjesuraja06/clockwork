@@ -4,7 +4,8 @@ All numbers in this file were measured on a Tesla T4 (sm75, 15.6 GB, CUDA 12.8) 
 top to bottom run of `notebooks/bench_t4.ipynb` on 2026-08-27, model
 Qwen/Qwen2.5-1.5B-Instruct in float16, after the correctness gates in that notebook
 passed on the same hardware. The build host (macOS, no CUDA GPU) produced no
-performance number.
+performance number. The raw run output (per-request CSVs, workload summaries, the
+microbench CSV, gpu_env.json, and figures) is attached to release v0.1.0 on GitHub.
 
 ## Evaluation protocol
 
