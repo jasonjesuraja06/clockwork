@@ -17,3 +17,4 @@ weights/
 runs/
 bench_out/
 data/sharegpt*.json
+results/
