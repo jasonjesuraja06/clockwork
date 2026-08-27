@@ -101,9 +101,10 @@ per second, and radix hit rate from the server's own usage accounting; the proto
 workload matrix are in `docs/results.md`, the internals in `docs/design.md`.
 
 Limitations: one model per process on a single GPU, no speculative decoding, no tensor
-parallelism, no quantization. Prefill is per sequence without chunking, so a prompt
-longer than `max_num_batched_tokens` (2048 in the shipped config) is never admitted and
-returns an empty completion; `docs/results.md` shows where this bites. On the build host
+parallelism, no quantization. Prefill is per sequence without chunking, so admissible
+prompts are capped at `max_num_batched_tokens` (4096 in the shipped config); the server
+rejects longer prompts with a 400. The T4 tables in `docs/results.md` were measured
+with the earlier 2048 budget, where three p2048 workloads were inadmissible. On the build host
 (macOS, no CUDA) the Triton kernel is validated by a line-for-line torch
 transliteration; on the T4 the gpu-marked kernel tests pass against the torch reference.
 

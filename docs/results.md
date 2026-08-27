@@ -58,10 +58,11 @@ turns earlier, which changes the load it then faces.
 Agent workload names encode shared prefix tokens (p), turns per session (t), and the
 arrival process; each ablation pair shares a seed, so the on and off runs replay an
 identical trace. nd: the three p2048 workloads returned no data because their opening
-prompts (2129 to 2308 tokens) exceed the shipped config's `max_num_batched_tokens`
-of 2048; the engine prefills per sequence without chunking, so such prompts are never
-admitted and the server answers with an empty completion instead of an error. This is
-a real limitation of the shipped config, kept in the table rather than hidden.
+prompts (2129 to 2308 tokens) exceeded the `max_num_batched_tokens` of 2048 that the
+config shipped at the time of the run; the engine prefills per sequence without
+chunking, so such prompts were never admitted. Kept in the table rather than hidden.
+The shipped config now sets the budget to 4096 and the server rejects inadmissible
+prompts with a 400 instead of an empty completion.
 
 ## Radix ablation
 
