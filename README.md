@@ -50,9 +50,19 @@ Correctness, measured on the build host (float32, cpu):
 | paged decode vs dense attention, max abs diff | 2.05e-07 |
 | Qwen2.5-1.5B-Instruct greedy decoding vs Hugging Face | PASS, exact token match |
 
-Performance is TBD: the build host has no CUDA GPU, and CPU timings are not engine
-performance. `notebooks/bench_t4.ipynb` runs `scripts/run_bench.py` on a CUDA host and
-fills every cell in `docs/results.md`.
+Performance, measured on a Tesla T4 (float16, CUDA 12.8) by a top to bottom run of
+`notebooks/bench_t4.ipynb`:
+
+| measurement | value |
+| --- | --- |
+| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 9.4x |
+| radix ablation, identical agent trace | 3.78x to 3.98x output tok/s |
+| agent-trace prefix hit rate | 0.86 to 0.91 |
+| mean output tok/s vs vLLM, 9 agent workloads | 262.9 vs 183.1 (1.24x to 1.82x each) |
+| mean output tok/s vs vLLM, 5 sharegpt workloads | 328.7 vs 340.7 |
+| peak output tok/s | 523.6 (sharegpt at 16 req/s) |
+
+Full tables, the fairness protocol, and known limits are in `docs/results.md`.
 
 ## Quickstart
 
@@ -91,9 +101,11 @@ per second, and radix hit rate from the server's own usage accounting; the proto
 workload matrix are in `docs/results.md`, the internals in `docs/design.md`.
 
 Limitations: one model per process on a single GPU, no speculative decoding, no tensor
-parallelism, no quantization. The build host is macOS with no CUDA device, so the Triton
-decode kernel is validated by a line-for-line torch transliteration checked against the
-torch reference until `notebooks/bench_t4.ipynb` runs the kernel itself on a CUDA host.
+parallelism, no quantization. Prefill is per sequence without chunking, so a prompt
+longer than `max_num_batched_tokens` (2048 in the shipped config) is never admitted and
+returns an empty completion; `docs/results.md` shows where this bites. On the build host
+(macOS, no CUDA) the Triton kernel is validated by a line-for-line torch
+transliteration; on the T4 the gpu-marked kernel tests pass against the torch reference.
 
 ## License
 
