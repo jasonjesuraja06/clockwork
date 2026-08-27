@@ -6,7 +6,6 @@ import csv
 import importlib.util
 import json
 import sys
-import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 
@@ -283,7 +282,7 @@ async def test_runner_end_to_end_smoke(tiny, tmp_path):
     assert float(summary_rows[0]["ttft_p50_ms"]) > 0.0
 
 
-def test_collect_results_tables_and_zip(tmp_path, repo_root, monkeypatch, capsys):
+def test_collect_results_tables(tmp_path, repo_root, monkeypatch, capsys):
     spec = importlib.util.spec_from_file_location(
         "collect_results", repo_root / "scripts" / "collect_results.py"
     )
@@ -328,24 +327,11 @@ def test_collect_results_tables_and_zip(tmp_path, repo_root, monkeypatch, capsys
     (figures / "vllm").mkdir(parents=True)
     (figures / "ttft_vs_rate.png").write_bytes(b"png")
     (figures / "vllm" / "ttft_vs_rate.png").write_bytes(b"png")
-    env_path = tmp_path / "gpu_env.json"
-    env_path.write_text(json.dumps({"gpu_name": "Tesla T4"}), encoding="utf-8")
-    out = tmp_path / "out"
 
     monkeypatch.setattr(
         sys,
         "argv",
-        [
-            "collect_results.py",
-            "--bench-dir",
-            str(bench),
-            "--figures",
-            str(figures),
-            "--env",
-            str(env_path),
-            "--out-dir",
-            str(out),
-        ],
+        ["collect_results.py", "--out", str(bench), "--figures", str(figures), "--no-figures"],
     )
     module.main()
     printed = capsys.readouterr().out
@@ -353,22 +339,11 @@ def test_collect_results_tables_and_zip(tmp_path, repo_root, monkeypatch, capsys
     assert "## vllm" in printed
     assert (bench / "clockwork" / "summary.csv").is_file()
     assert not (bench / "summary.csv").exists()
-    results_md = (out / "results.md").read_text(encoding="utf-8")
-    assert "gpu_name: Tesla T4" in results_md
+    results_md = (bench / "results.md").read_text(encoding="utf-8")
     assert "## clockwork" in results_md
     assert "## vllm" in results_md
-    zip_path = out / "clockwork_results_tesla_t4.zip"
-    assert zip_path.is_file()
-    with zipfile.ZipFile(zip_path) as bundle:
-        names = set(bundle.namelist())
-    assert "results.md" in names
-    assert "gpu_env.json" in names
-    assert "results/clockwork/unit.csv" in names
-    assert "results/clockwork/summary.csv" in names
-    assert "results/vllm/summary.csv" in names
-    assert "figures/ttft_vs_rate.png" in names
-    assert "figures/vllm/ttft_vs_rate.png" in names
-    assert "results/microbench_decode.csv" not in names
+    assert "microbench" not in results_md
+    assert len(list(figures.rglob("*.png"))) == 2
 
 
 def test_plots_write_pngs_into_tmp_path(tmp_path, repo_root):
@@ -484,3 +459,37 @@ def test_plots_write_pngs_into_tmp_path(tmp_path, repo_root):
     for path in written:
         assert tmp_path in path.parents
         assert path.stat().st_size > 0
+
+
+def test_notebook_calls_match_script_interfaces():
+    import ast
+    import json
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    notebook = json.loads((root / "notebooks" / "bench_t4.ipynb").read_text(encoding="utf-8"))
+    scripts = ("run_bench.py", "collect_results.py", "serve.py")
+    used: dict[str, set[str]] = {}
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        tree = ast.parse("".join(cell["source"]))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List):
+                continue
+            texts = [
+                el.value
+                for el in node.elts
+                if isinstance(el, ast.Constant) and isinstance(el.value, str)
+            ]
+            for script in scripts:
+                if any(text.endswith(f"scripts/{script}") for text in texts):
+                    flags = {text for text in texts if text.startswith("--")}
+                    used.setdefault(script, set()).update(flags)
+    assert used, "notebook never invokes the bench scripts as list literals"
+    for script, flags in used.items():
+        source = (root / "scripts" / script).read_text(encoding="utf-8")
+        declared = set(re.findall(r'add_argument\(\s*"(--[a-z-]+)"', source))
+        missing = flags - declared
+        assert not missing, f"{script} lacks flags the notebook uses: {sorted(missing)}"
