@@ -5,6 +5,10 @@ cache behind an OpenAI-compatible API.
 
 [![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml)
 
+Measured on a Tesla T4: 1.24x to 1.82x vLLM's output throughput on agent workloads,
+3.8x to 4.0x from the radix cache on identical traces, a 9.4x peak Triton kernel
+speedup, and greedy decoding that matches the Hugging Face reference token for token.
+
 ## Motivation
 
 Agent loops resend the same system prompt, tool schemas, and conversation history on
@@ -63,6 +67,8 @@ Performance, measured on a Tesla T4 (float16, CUDA 12.8) by a top to bottom run 
 | peak output tok/s | 523.6 (sharegpt at 16 req/s) |
 
 Full tables, the fairness protocol, and known limits are in `docs/results.md`.
+
+![radix ablation, identical traces with the prefix cache on versus off](docs/figures/radix_ablation.png)
 
 ## Quickstart
 
