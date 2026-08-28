@@ -20,13 +20,13 @@ block-table lookup instead of a prefill, targeting time to first token on that t
 
 ## Measured results
 
-Correctness, measured on the build host (float32, cpu):
+Correctness gates, run in float32 on cpu:
 
 | check | value |
 | --- | --- |
-| tiny-model max abs logit diff vs Hugging Face | 2.98e-07 |
+| tiny-model logits vs Hugging Face | agree within atol and rtol 1e-5 |
 | paged prefill vs dense attention, max abs diff | 0.0 |
-| paged decode vs dense attention, max abs diff | 2.05e-07 |
+| paged decode vs dense attention | agrees within atol and rtol 1e-6 |
 | Qwen2.5-1.5B-Instruct greedy decoding vs Hugging Face | PASS, exact token match |
 
 Performance, measured on a Tesla T4 (float16, CUDA 12.8) by `notebooks/bench_t4.ipynb`:
@@ -45,7 +45,7 @@ Read the vLLM row as scoped: those 12 agent traces are self-designed by this pro
 long shared prefixes are the structure this engine exists to exploit, so the comparison favors
 clockwork by construction. The 5 single-turn rows draw prompts from the ShareGPT trace; their
 config names keep a stale `synthetic_` prefix. Both engines were driven by this repository's own
-harness; no independent tool has corroborated it. Full disclosure and tables: `docs/results.md`.
+harness; no independent tool has corroborated any of it. Full disclosure and tables: `docs/results.md`.
 
 ![radix ablation, identical traces with the prefix cache on versus off](docs/figures/radix_ablation.png)
 
