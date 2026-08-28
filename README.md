@@ -4,9 +4,10 @@ An LLM inference engine with continuous batching, a paged KV cache, and a radix 
 cache behind an OpenAI-compatible API.
 
 [![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml)
+[latest release v0.3.0: raw benchmark CSVs and figures](https://github.com/jasonjesuraja06/clockwork/releases/tag/v0.3.0)
 
-Measured on a Tesla T4 by this repo's own harness: 1.17x to 2.38x vLLM output throughput on 12
-self-designed agent traces, p99 ttft down 81% from the prefix cache, 8.5x peak Triton
+Measured on a Tesla T4 by this repo's own harness: 1.15x to 2.28x vLLM output throughput on 12
+self-designed agent traces, p99 ttft down 81.0% from the prefix cache, 8.52x peak Triton
 speedup, greedy decoding token-exact vs Hugging Face.
 
 ## Motivation
@@ -16,6 +17,37 @@ tokens reaching the server carry KV that was already computed. Continuous batchi
 busy across uneven request lengths, paged KV storage turns cache memory into fixed-size blocks
 shared and reclaimed per block, and a radix prefix cache resolves the repeated prefix to a
 block-table lookup instead of a prefill, targeting time to first token on that traffic.
+
+## Measured results
+
+Correctness, measured on the build host (float32, cpu):
+
+| check | value |
+| --- | --- |
+| tiny-model max abs logit diff vs Hugging Face | 2.98e-07 |
+| paged prefill vs dense attention, max abs diff | 0.0 |
+| paged decode vs dense attention, max abs diff | 2.05e-07 |
+| Qwen2.5-1.5B-Instruct greedy decoding vs Hugging Face | PASS, exact token match |
+
+Performance, measured on a Tesla T4 (float16, CUDA 12.8) by `notebooks/bench_t4.ipynb`:
+
+| measurement | value |
+| --- | --- |
+| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 8.52x |
+| prefix cache, cold trace versus identical warm replay | ttft p50 down 42.9%, p99 down 81.0% |
+| radix ablation, identical agent trace | 1.47x to 2.04x output tok/s, ttft p50 down 90 to 98% |
+| agent-trace prefix hit rate | 0.832 to 0.906 |
+| mean output tok/s vs vLLM, 12 self-designed agent traces | 241.0 vs 166.3, 12 of 12 (1.15x to 2.28x) |
+| mean output tok/s vs vLLM, 5 ShareGPT single-turn workloads | 464.5 vs 575.0 |
+| peak output tok/s | 641.1 (ShareGPT single-turn at 16 req/s) |
+
+Read the vLLM row as scoped: those 12 agent traces are self-designed by this project, and their
+long shared prefixes are the structure this engine exists to exploit, so the comparison favors
+clockwork by construction. The 5 single-turn rows draw prompts from the ShareGPT trace; their
+config names keep a stale `synthetic_` prefix. Both engines were driven by this repository's own
+harness; no independent tool has corroborated it. Full disclosure and tables: `docs/results.md`.
+
+![radix ablation, identical traces with the prefix cache on versus off](docs/figures/radix_ablation.png)
 
 ## Architecture
 
@@ -38,38 +70,6 @@ server (FastAPI) --> AsyncLLMEngine --> LLMEngine.step()
         v
     Qwen2 model --> attention kernels (torch reference, Triton paged decode)
 ```
-
-## Measured results
-
-Correctness, measured on the build host (float32, cpu):
-
-| check | value |
-| --- | --- |
-| tiny-model max abs logit diff vs Hugging Face | 2.98e-07 |
-| paged prefill vs dense attention, max abs diff | 0.0 |
-| paged decode vs dense attention, max abs diff | 2.05e-07 |
-| Qwen2.5-1.5B-Instruct greedy decoding vs Hugging Face | PASS, exact token match |
-
-Performance, measured on a Tesla T4 (float16, CUDA 12.8) by `notebooks/bench_t4.ipynb`:
-
-| measurement | value |
-| --- | --- |
-| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 8.5x |
-| prefix cache, cold trace versus identical warm replay | ttft p50 down 43%, p99 down 81% |
-| radix ablation, identical agent trace | 1.42x to 2.03x output tok/s, ttft p50 down 91 to 98% |
-| agent-trace prefix hit rate | 0.83 to 0.91 |
-| mean output tok/s vs vLLM, 12 self-designed agent traces | 245.2 vs 168.7, 12 of 12 (1.17x to 2.38x) |
-| mean output tok/s vs vLLM, 5 ShareGPT single-turn workloads | 464.5 vs 575.0 |
-| peak output tok/s | 641.1 (ShareGPT single-turn at 16 req/s) |
-
-Read the vLLM row as scoped: those 12 agent traces are self-designed by this project, and their
-long shared prefixes are the structure this engine exists to exploit, so the comparison favors
-clockwork by construction. The 5 single-turn rows came from a seeded synthetic length sampler, not
-the ShareGPT dataset, because the run had no `data/sharegpt.json`. Both engines were driven by this
-repository's own harness; no independent tool has corroborated any of it. Full disclosure and
-tables: `docs/results.md`.
-
-![radix ablation, identical traces with the prefix cache on versus off](docs/figures/radix_ablation.png)
 
 ## Quickstart
 
