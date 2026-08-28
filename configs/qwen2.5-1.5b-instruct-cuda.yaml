@@ -34,6 +34,7 @@ attention_backend: auto
 # past this point buys nothing at these scheduler settings.
 #
 # Fit on a 16 GB card: 7.0 GiB KV + 2.88 GiB float16 weights (the published
-# checkpoint is 3,087,467,144 bytes) = 9.9 GiB, leaving about 6 GiB for
-# activations, the CUDA context, and the Triton workspace. On a 24 GB card raise
-# max_num_seqs and num_blocks together, since the ceiling above is what binds.
+# checkpoint is 3,087,467,144 bytes) = 9.9 GiB. A 16 GB card is 14.9 GiB, so
+# that leaves about 5 GiB for activations, the CUDA context, and the Triton
+# workspace. On a 24 GB card raise max_num_seqs and num_blocks together, since
+# the ceiling above is what binds.
