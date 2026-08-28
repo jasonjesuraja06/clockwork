@@ -5,9 +5,9 @@ cache behind an OpenAI-compatible API.
 
 [![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml)
 
-Measured on a Tesla T4: 1.24x to 1.82x vLLM's output throughput on agent workloads,
-3.8x to 4.0x from the radix cache on identical traces, a 9.4x peak Triton kernel
-speedup, and greedy decoding that matches the Hugging Face reference token for token.
+Measured on a Tesla T4: 1.17x to 2.38x vLLM's output throughput on all 12 agent workloads,
+a 77 percent cut in p99 time to first token from the prefix cache, an 8.3x peak Triton
+kernel speedup, and greedy decoding token-exact against the Hugging Face reference.
 
 ## Motivation
 
@@ -59,12 +59,13 @@ Performance, measured on a Tesla T4 (float16, CUDA 12.8) by a top to bottom run 
 
 | measurement | value |
 | --- | --- |
-| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 9.4x |
-| radix ablation, identical agent trace | 3.78x to 3.98x output tok/s |
-| agent-trace prefix hit rate | 0.86 to 0.91 |
-| mean output tok/s vs vLLM, 9 agent workloads | 262.9 vs 183.1 (1.24x to 1.82x each) |
-| mean output tok/s vs vLLM, 5 sharegpt workloads | 328.7 vs 340.7 |
-| peak output tok/s | 523.6 (sharegpt at 16 req/s) |
+| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 8.3x |
+| prefix cache, cold trace versus identical warm replay | ttft p50 down 49%, p99 down 77% |
+| radix ablation, identical agent trace | 1.42x to 2.03x output tok/s, ttft p50 down 91 to 98% |
+| agent-trace prefix hit rate | 0.83 to 0.91 |
+| mean output tok/s vs vLLM, 12 agent workloads | 245.2 vs 168.7, faster on 12 of 12 (1.17x to 2.38x) |
+| mean output tok/s vs vLLM, 5 sharegpt workloads | 318.0 vs 337.1 |
+| peak output tok/s | 499.0 (sharegpt at 16 req/s) |
 
 Full tables, the fairness protocol, and known limits are in `docs/results.md`.
 
@@ -109,8 +110,10 @@ workload matrix are in `docs/results.md`, the internals in `docs/design.md`.
 Limitations: one model per process on a single GPU, no speculative decoding, no tensor
 parallelism, no quantization. Prefill is per sequence without chunking, so admissible
 prompts are capped at `max_num_batched_tokens` (4096 in the shipped config); the server
-rejects longer prompts with a 400. The T4 tables in `docs/results.md` were measured
-with the earlier 2048 budget, where three p2048 workloads were inadmissible. On the build host
+rejects longer prompts with a 400. The throughput win is specific to concurrent agent
+traffic: vLLM leads on single-turn sharegpt traffic, on inter-token latency nearly
+everywhere, and on fixed-length single-session completion. `docs/results.md` reports all
+three. On the build host
 (macOS, no CUDA) the Triton kernel is validated by a line-for-line torch
 transliteration; on the T4 the gpu-marked kernel tests pass against the torch reference.
 
