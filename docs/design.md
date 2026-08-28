@@ -4,7 +4,9 @@ Clockwork serves one model per process. A FastAPI layer accepts OpenAI-compatibl
 requests, an async engine feeds a continuous-batching scheduler, and a model runner
 executes flat token batches against a paged KV cache. The reference model
 implementation matches Hugging Face greedy decoding token for token; that equivalence
-is a pytest gate, not an aspiration.
+is a pytest gate, not an aspiration. The engine targets the Qwen2 architecture and the
+loader validates `model_type`, so serving a Llama or Mistral checkpoint means adding
+that architecture's model class rather than repointing a config at new weights.
 
 ## Scheduler
 
