@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from collections import defaultdict
 from pathlib import Path
+from statistics import median
 
 import matplotlib
 
@@ -72,26 +73,88 @@ def _throughput_figure(rows: list[dict], path: Path) -> Path:
     return path
 
 
+def _median_by_rate(rows: list[dict]) -> dict[float, dict]:
+    """Collapse repeated runs of the same rate to the median, as docs/results.md reports them."""
+    grouped: dict[float, list[dict]] = defaultdict(list)
+    for row in rows:
+        grouped[row["request_rate"]].append(row)
+    return {
+        rate: {
+            key: median([row[key] for row in group])
+            for key in ("ttft_p50_ms", "ttft_p99_ms", "itl_p50_ms", "itl_p99_ms", "output_tok_s")
+        }
+        for rate, group in grouped.items()
+    }
+
+
 def _ablation_figure(rows: list[dict], path: Path) -> Path:
+    # ttft p50 spans two orders of magnitude between the on and off runs, so a
+    # linear axis draws the on bars as slivers; log y keeps both readable. The
+    # second panel plots output tok/s rather than prefix hit rate, which is
+    # zero by construction whenever the cache is off and carries no signal.
     rates = sorted({row["request_rate"] for row in rows})
-    fig, (ax_ttft, ax_hit) = plt.subplots(1, 2, figsize=(9, 4.5))
+    fig, (ax_ttft, ax_tok) = plt.subplots(1, 2, figsize=(9, 4.6))
     width = 0.35
-    variants = ((-width / 2, "True", "radix on"), (width / 2, "False", "radix off"))
-    for offset, enabled, label in variants:
-        subset = {row["request_rate"]: row for row in rows if row["radix_enabled"] == enabled}
-        xs = [i + offset for i, rate in enumerate(rates) if rate in subset]
-        ttfts = [subset[rate]["ttft_p50_ms"] for rate in rates if rate in subset]
-        hits = [subset[rate]["hit_rate"] for rate in rates if rate in subset]
-        ax_ttft.bar(xs, ttfts, width=width, label=label)
-        ax_hit.bar(xs, hits, width=width, label=label)
-    for ax, ylabel in ((ax_ttft, "ttft p50 (ms)"), (ax_hit, "prefix cache hit rate")):
+    variants = (
+        (-width / 2, "True", "radix on", "#0072B2"),
+        (width / 2, "False", "radix off", "#E69F00"),
+    )
+    by_variant: dict[str, dict[float, dict]] = {}
+    for offset, enabled, label, color in variants:
+        subset = _median_by_rate([row for row in rows if row["radix_enabled"] == enabled])
+        by_variant[enabled] = subset
+        present = [rate for rate in rates if rate in subset]
+        xs = [rates.index(rate) + offset for rate in present]
+        ttfts = [subset[rate]["ttft_p50_ms"] for rate in present]
+        toks = [subset[rate]["output_tok_s"] for rate in present]
+        ax_ttft.bar(xs, ttfts, width=width, label=label, color=color, zorder=3)
+        ax_tok.bar(xs, toks, width=width, label=label, color=color, zorder=3)
+        for ax, values in ((ax_ttft, ttfts), (ax_tok, toks)):
+            for x, value in zip(xs, values, strict=True):
+                ax.text(x, value, f"{value:.0f}", ha="center", va="bottom", fontsize=8)
+    on, off = by_variant.get("True", {}), by_variant.get("False", {})
+    ratios = [
+        on[rate]["output_tok_s"] / off[rate]["output_tok_s"]
+        for rate in rates
+        if rate in on and rate in off and off[rate]["output_tok_s"]
+    ]
+    for ax, ylabel in ((ax_ttft, "ttft p50 (ms), log scale"), (ax_tok, "output tokens per second")):
         ax.set_xticks(range(len(rates)))
         ax.set_xticklabels([f"{rate:g}" for rate in rates])
         ax.set_xlabel("request rate (req/s)")
         ax.set_ylabel(ylabel)
-        ax.legend()
+        ax.grid(True, axis="y", alpha=0.3, zorder=0)
+        ax.set_axisbelow(True)
+        ax.legend(frameon=False)
+    ax_ttft.set_yscale("log")
+    ax_ttft.set_ylim(
+        bottom=min(row["ttft_p50_ms"] for row in rows) / 2.5,
+        top=max(row["ttft_p50_ms"] for row in rows) * 4.0,
+    )
+    ax_tok.set_ylim(top=max(row["output_tok_s"] for row in rows) * 1.22)
+    if ratios:
+        # The label follows the workload's `radix_enabled` flag, the same column
+        # docs/results.md prints, so the title claims a measured ratio and not
+        # an engine behaviour the CSV cannot vouch for.
+        fig.suptitle(
+            f"Prefix cache flag on versus off, identical traces: output tok/s"
+            f" {min(ratios):.2f}x to {max(ratios):.2f}x",
+            fontsize=12,
+            fontweight="bold",
+        )
+        for rate, ratio in zip(
+            [rate for rate in rates if rate in on and rate in off], ratios, strict=True
+        ):
+            ax_tok.text(
+                rates.index(rate),
+                max(on[rate]["output_tok_s"], off[rate]["output_tok_s"]) * 1.09,
+                f"{ratio:.2f}x",
+                ha="center",
+                fontsize=9,
+                fontweight="bold",
+            )
     fig.tight_layout()
-    fig.savefig(path, dpi=150)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return path
 

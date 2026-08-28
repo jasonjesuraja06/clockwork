@@ -17,6 +17,7 @@ from clockwork.bench import runner
 from clockwork.bench.configs import WORKLOADS, WorkloadConfig
 from clockwork.bench.metrics import percentile, summarize
 from clockwork.bench.plots import plot_all
+from clockwork.bench.portfolio_plots import plot_portfolio
 from clockwork.bench.workloads import HashWordTokenizer, generate
 from clockwork.config import EngineConfig
 from clockwork.engine.async_engine import AsyncLLMEngine
@@ -529,3 +530,104 @@ def test_notebook_calls_match_script_interfaces():
         declared = set(re.findall(r'add_argument\(\s*"(--[a-z-]+)"', source))
         missing = flags - declared
         assert not missing, f"{script} lacks flags the notebook uses: {sorted(missing)}"
+
+
+def _portfolio_results(root):
+    """Build the smallest results tree that plot_portfolio will render all three figures from."""
+    summary_defaults = {
+        "num_requests": "4",
+        "num_errors": "0",
+        "hit_rate": "0.9",
+        "gpu_util_mean": "",
+        "gpu_util_max": "",
+        "kind": "agent",
+        "radix_enabled": "True",
+        "seed": "201",
+        "ttft_p99_ms": "20.0",
+        "itl_p50_ms": "1.0",
+        "itl_p99_ms": "2.0",
+    }
+    engines = {"clockwork": (200.0, 150.0), "vllm": (100.0, 120.0)}
+    for engine, (fast, slow) in engines.items():
+        (root / engine).mkdir(parents=True)
+        with (root / engine / "summary.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=runner.SUMMARY_FIELDS)
+            writer.writeheader()
+            workloads = (("agent_p1024_t4to8_pois_r2", fast), ("agent_p2048_t8to16_pois_r4", slow))
+            for name, tok_s in workloads:
+                writer.writerow(
+                    summary_defaults
+                    | {
+                        "workload": name,
+                        "request_rate": "2.0",
+                        "ttft_p50_ms": "10.0",
+                        "output_tok_s": str(tok_s),
+                    }
+                )
+    (root / "microbench_decode.csv").write_text(
+        "batch,ctx_len,torch_ms,triton_ms,speedup\n"
+        "1,128,0.5,0.1,5.0\n"
+        "1,2048,0.5,0.625,0.8\n",
+        encoding="utf-8",
+    )
+    request_defaults = {
+        "workload": "agent_p1536_t6to12_pois_r2",
+        "kind": "agent",
+        "request_rate": "2.0",
+        "radix_enabled": "True",
+        "seed": "205",
+        "session_id": "s0",
+        "turn": "0",
+        "arrival_s": "0.0",
+        "start_s": "0.0",
+        "end_s": "1.0",
+        "itl_ms": "1.0;2.0",
+        "prompt_tokens": "10",
+        "output_tokens": "3",
+        "cached_tokens": "0",
+        "error": "",
+    }
+    for pass_name, ttfts in (("ttft_cold", [100.0, 400.0]), ("ttft_warm", [50.0, 200.0])):
+        (root / pass_name).mkdir()
+        target = root / pass_name / "agent_p1536_t6to12_pois_r2.csv"
+        with target.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=runner.CSV_FIELDS)
+            writer.writeheader()
+            for index, ttft in enumerate(ttfts):
+                row = request_defaults | {"request_id": f"r{index}", "ttft_ms": str(ttft)}
+                writer.writerow(row)
+    return root
+
+
+def test_portfolio_plots_write_pngs_into_tmp_path(tmp_path, repo_root):
+    results = _portfolio_results(tmp_path / "results")
+    figures_dir = repo_root / "docs" / "figures"
+    before = set(figures_dir.iterdir()) if figures_dir.is_dir() else set()
+    written = plot_portfolio(results, tmp_path / "figs")
+    after = set(figures_dir.iterdir()) if figures_dir.is_dir() else set()
+    assert after == before, "portfolio plot test wrote into docs/figures"
+    assert {path.name for path in written} == {
+        "agent_throughput_vs_vllm.png",
+        "decode_kernel_speedup.png",
+        "ttft_cold_vs_warm.png",
+    }
+    for path in written:
+        assert tmp_path in path.parents
+        assert path.stat().st_size > 0
+
+
+def test_portfolio_plots_skip_absent_inputs(tmp_path):
+    empty = tmp_path / "results"
+    empty.mkdir()
+    assert plot_portfolio(empty, tmp_path / "figs") == []
+
+
+def test_ttft_cdf_rejects_stale_derived_metrics(tmp_path):
+    results = _portfolio_results(tmp_path / "results")
+    # p50 cold is 400.0 in the fixture; a derived metrics file that disagrees
+    # must stop the figure rather than publish a number no CSV supports.
+    (results / "derived_metrics.csv").write_text(
+        "metric,value\nttft_p50_cold_ms,999.9\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="derived metrics disagree"):
+        plot_portfolio(results, tmp_path / "figs")

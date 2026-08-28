@@ -3,8 +3,7 @@
 An LLM inference engine with continuous batching, a paged KV cache, and a radix prefix
 cache behind an OpenAI-compatible API.
 
-[![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml)
-[latest release v0.3.0: raw benchmark CSVs and figures](https://github.com/jasonjesuraja06/clockwork/releases/tag/v0.3.0)
+[![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml) [latest release v0.3.0: raw benchmark CSVs and figures](https://github.com/jasonjesuraja06/clockwork/releases/tag/v0.3.0)
 
 Measured on a Tesla T4 by this repo's own harness: 1.15x to 2.28x vLLM output throughput on 12
 self-designed agent traces, p99 ttft down 81.0% from the prefix cache, 8.52x peak Triton
@@ -47,7 +46,9 @@ clockwork by construction. The 5 single-turn rows draw prompts from the ShareGPT
 config names keep a stale `synthetic_` prefix. Both engines were driven by this repository's own
 harness; no independent tool has corroborated any of it. Full disclosure and tables: `docs/results.md`.
 
-![radix ablation, identical traces with the prefix cache on versus off](docs/figures/radix_ablation.png)
+![output tok/s on the 12 self-designed agent traces, clockwork ahead of vLLM on 12 of 12](docs/figures/agent_throughput_vs_vllm.png)
+
+![time to first token as a cdf, cold trace versus identical warm replay, p50 down 42.9 percent and p99 down 81.0 percent](docs/figures/ttft_cold_vs_warm.png)
 
 ## Architecture
 

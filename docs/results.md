@@ -67,10 +67,14 @@ Identical traces, server relaunched with the prefix cache off:
 Utilization falls when the cache is on because the cache removes redundant prefill: the
 device does less work and produces more output.
 
+![ttft p50 on a log axis and output tok/s, prefix cache flag on versus off](figures/radix_ablation.png)
+
 A cold versus warm experiment isolates the same effect on one trace with no config change.
 TTFT p50 falls from 355.1 ms to 202.6 ms
 (42.9 percent) and p99 from 2314.6 ms to
 438.7 ms (81.0 percent).
+
+![time to first token as a cdf, cold trace versus identical warm replay](figures/ttft_cold_vs_warm.png)
 
 ## Paged decode kernel
 
@@ -93,9 +97,15 @@ The Triton kernel wins 11 of 12 shapes, peaking at 8.52x
 (batch 1, ctx 128), so `resolve_backend("auto")` selects it.
 `results/roofline_decode.csv` records the measured arithmetic intensity behind this.
 
+![per-shape triton speedup over the torch paged-decode reference](figures/decode_kernel_speedup.png)
+
 ## vLLM baseline
 
-Same model, dtype, traces, and harness; vLLM v1 on default settings.
+Same model, dtype, traces, and harness; vLLM v1 on default settings. The radix-off rows name
+the workload's own flag: vLLM ran on its defaults throughout and its prefix-cache counters stay
+above 0.99 on those rows, so they are not a vLLM ablation.
+
+![output tok/s per agent workload, clockwork versus vLLM](figures/agent_throughput_vs_vllm.png)
 
 | workload | kind | req/s | radix | ttft p50 (ms) | ttft p99 (ms) | itl p50 (ms) | itl p99 (ms) | out tok/s | hit rate |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -140,6 +150,11 @@ the reason and continues, and no substitute numbers are reported.
 uv run python scripts/serve.py --config configs/qwen2.5-1.5b-instruct-cuda.yaml
 uv run python scripts/run_bench.py --configs all --base-url http://127.0.0.1:8000 \
   --out bench_results --plots docs/figures
+uv run python scripts/make_figures.py --results bench_results
 ```
+
+`scripts/make_figures.py` rebuilds every figure under `docs/figures` from one directory of result
+CSVs and nothing else; it reads no other input and plots no value it did not read from a file. The
+committed figures come from `uv run python scripts/make_figures.py`, whose default is `results/`.
 
 The radix-off ablations need `--set enable_prefix_cache=false` on the server.
