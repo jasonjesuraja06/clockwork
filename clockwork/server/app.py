@@ -36,6 +36,7 @@ def _sampling_params(
         max_tokens=req.max_tokens if req.max_tokens is not None else _DEFAULT_MAX_TOKENS,
         temperature=req.temperature,
         top_p=req.top_p,
+        top_k=req.top_k,
         stop=list(stop),
         seed=req.seed,
         ignore_eos=req.ignore_eos,
@@ -104,6 +105,10 @@ def build_app(cfg: EngineConfig, engine: AsyncLLMEngine | None = None) -> FastAP
             return _error(400, f"model {req.model!r} does not exist; serving {served_model!r}")
         if req.n != 1:
             return _error(400, "only n=1 is supported")
+        # -1 is the disabled sentinel; 0 and other negatives would silently fall
+        # through the sampler's `0 < top_k` guard and behave as if unset.
+        if req.top_k != -1 and req.top_k < 1:
+            return _error(400, f"top_k must be -1 (disabled) or >= 1, got {req.top_k}")
         return None
 
     def bad_prompt(prompt_ids: list[int]) -> JSONResponse | None:

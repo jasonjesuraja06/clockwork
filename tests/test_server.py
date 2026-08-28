@@ -320,6 +320,54 @@ async def test_seeded_sampling_reproducible_across_requests(tiny):
     assert first.json()["usage"]["completion_tokens"] == 10
 
 
+async def test_top_k_one_reproduces_greedy_output(tiny):
+    _, config = tiny
+    messages = make_messages(config.vocab_size, [10], seed=17)[0]
+    greedy = sync_chat(tiny, messages, SamplingParams(max_tokens=12))
+    base = {"model": MODEL, "messages": messages, "max_tokens": 12, "temperature": 1.0, "seed": 7}
+    async with serve(tiny) as client:
+        capped = await client.post("/v1/chat/completions", json={**base, "top_k": 1})
+        uncapped = await client.post("/v1/chat/completions", json={**base, "top_k": -1})
+    assert capped.status_code == 200
+    assert uncapped.status_code == 200
+    # top_k=1 leaves the argmax holding all the probability mass, so sampling at
+    # temperature 1.0 is deterministic and must match greedy decoding token for token.
+    assert capped.json()["choices"][0]["message"]["content"] == greedy.text
+    assert capped.json()["usage"]["completion_tokens"] == 12
+    # Same seed and temperature with the cap disabled wanders off the greedy path.
+    # Without this the test would still pass if top_k were dropped before the sampler.
+    assert uncapped.json()["choices"][0]["message"]["content"] != greedy.text
+
+
+async def test_invalid_top_k_returns_400(tiny):
+    messages = [{"role": "user", "content": "1 2 3"}]
+    async with serve(tiny) as client:
+        zero_chat = await client.post(
+            "/v1/chat/completions", json={"model": MODEL, "messages": messages, "top_k": 0}
+        )
+        negative_completion = await client.post(
+            "/v1/completions", json={"model": MODEL, "prompt": "1 2 3", "top_k": -2}
+        )
+        sentinel = await client.post(
+            "/v1/completions",
+            json={
+                "model": MODEL,
+                "prompt": "1 2 3",
+                "max_tokens": 2,
+                "temperature": 0.0,
+                "top_k": -1,
+            },
+        )
+    for resp in (zero_chat, negative_completion):
+        assert resp.status_code == 400
+        error = resp.json()["error"]
+        assert error["type"] == "invalid_request_error"
+        assert "top_k" in error["message"]
+    # -1 is the documented disabled sentinel, not an invalid value.
+    assert sentinel.status_code == 200
+    assert sentinel.json()["usage"]["completion_tokens"] == 2
+
+
 async def test_health_models_and_metrics_shape(tiny):
     async with serve(tiny) as client:
         health = await client.get("/health")

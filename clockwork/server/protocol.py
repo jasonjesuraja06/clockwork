@@ -7,6 +7,11 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+_TOP_K_DESCRIPTION = (
+    "Sample only from the k highest-logit tokens. -1 is the sentinel for disabled, "
+    "which keeps the full vocabulary; any other value must be >= 1."
+)
+
 
 def random_id(prefix: str) -> str:
     """Return a fresh request id with the given OpenAI-style prefix."""
@@ -29,6 +34,7 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float = 1.0
     top_p: float = 1.0
+    top_k: int = Field(default=-1, description=_TOP_K_DESCRIPTION)
     n: int = 1
     stream: bool = False
     stop: str | list[str] | None = None
@@ -42,6 +48,7 @@ class CompletionRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float = 1.0
     top_p: float = 1.0
+    top_k: int = Field(default=-1, description=_TOP_K_DESCRIPTION)
     n: int = 1
     stream: bool = False
     stop: str | list[str] | None = None
