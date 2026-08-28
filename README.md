@@ -6,7 +6,7 @@ cache behind an OpenAI-compatible API.
 [![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml)
 
 Measured on a Tesla T4 by this repo's own harness: 1.17x to 2.38x vLLM output throughput on 12
-self-designed synthetic agent traces, p99 ttft down 77% from the prefix cache, 8.3x peak Triton
+self-designed agent traces, p99 ttft down 81% from the prefix cache, 8.5x peak Triton
 speedup, greedy decoding token-exact vs Hugging Face.
 
 ## Motivation
@@ -54,13 +54,13 @@ Performance, measured on a Tesla T4 (float16, CUDA 12.8) by `notebooks/bench_t4.
 
 | measurement | value |
 | --- | --- |
-| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 8.3x |
-| prefix cache, cold trace versus identical warm replay | ttft p50 down 49%, p99 down 77% |
+| Triton vs torch paged decode | faster on 11 of 12 shapes, up to 8.5x |
+| prefix cache, cold trace versus identical warm replay | ttft p50 down 43%, p99 down 81% |
 | radix ablation, identical agent trace | 1.42x to 2.03x output tok/s, ttft p50 down 91 to 98% |
 | agent-trace prefix hit rate | 0.83 to 0.91 |
 | mean output tok/s vs vLLM, 12 self-designed agent traces | 245.2 vs 168.7, 12 of 12 (1.17x to 2.38x) |
-| mean output tok/s vs vLLM, 5 synthetic single-turn workloads | 318.0 vs 337.1 |
-| peak output tok/s | 499.0 (synthetic single-turn at 16 req/s) |
+| mean output tok/s vs vLLM, 5 ShareGPT single-turn workloads | 464.5 vs 575.0 |
+| peak output tok/s | 641.1 (ShareGPT single-turn at 16 req/s) |
 
 Read the vLLM row as scoped: those 12 agent traces are self-designed by this project, and their
 long shared prefixes are the structure this engine exists to exploit, so the comparison favors
