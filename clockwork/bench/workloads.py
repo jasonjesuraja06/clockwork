@@ -1,20 +1,33 @@
-"""Seeded workload generation: sharegpt single turn, agent traces, radix ablation."""
+"""Seeded workload generation: single-turn requests, agent traces, radix ablation."""
 
-# The sharegpt kind reads data/sharegpt.json when the file exists and samples
-# real conversations with the workload seed. When the file is absent (the
-# default checkout; notebooks/bench_t4.ipynb downloads it for GPU runs) the
-# generator synthesizes sharegpt-like prompt and output length distributions
-# from the seeded lognormal sampler below and fills the text from VOCABULARY.
+# The singleturn kind reads a real conversation trace from data/sharegpt.json when
+# that file exists and samples it with the workload seed. When the file is absent
+# the generator SYNTHESIZES prompt and output length distributions from the seeded
+# lognormal sampler below and fills the text from VOCABULARY. That fallback is not
+# the ShareGPT dataset: it is a lognormal length distribution with hardcoded
+# parameters, sampled over a 210-word vocabulary, and results taken from it must
+# not be labeled ShareGPT. generate() logs a warning every time it takes that path.
+#
+# No run of this repository has yet had data/sharegpt.json on disk, so the shipped
+# workload matrix names those configs synthetic_singleturn_* to state that plainly.
+#
+# The agent kind is self-designed by this project: a long shared system-plus-tools
+# prefix followed by short per-turn suffixes. It is not a public dataset and not a
+# captured production trace, and it is the exact structure the radix prefix cache
+# exists to exploit, so measurements on it favor this engine by construction.
 
 from __future__ import annotations
 
 import json
+import logging
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from random import Random
 
 from clockwork.bench.configs import WorkloadConfig
+
+logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -289,13 +302,13 @@ def _clamped_lognormal(rng: Random, mean: float, sigma: float, lo: int, hi: int)
     return max(lo, min(hi, int(rng.lognormvariate(mean, sigma))))
 
 
-def _sharegpt_file(cfg: WorkloadConfig) -> Path:
-    if cfg.sharegpt_path:
-        return Path(cfg.sharegpt_path)
+def _real_trace_file(cfg: WorkloadConfig) -> Path:
+    if cfg.real_trace_path:
+        return Path(cfg.real_trace_path)
     return _REPO_ROOT / "data" / "sharegpt.json"
 
 
-def _sharegpt_pairs(path: Path, tokenizer, cfg: WorkloadConfig) -> list[tuple[str, int, int]]:
+def _real_trace_pairs(path: Path, tokenizer, cfg: WorkloadConfig) -> list[tuple[str, int, int]]:
     entries = json.loads(path.read_text(encoding="utf-8"))
     pairs: list[tuple[str, int, int]] = []
     for entry in entries:
@@ -316,10 +329,26 @@ def _sharegpt_pairs(path: Path, tokenizer, cfg: WorkloadConfig) -> list[tuple[st
     return pairs
 
 
-def _gen_sharegpt(cfg: WorkloadConfig, tokenizer, rng: Random) -> list[BenchRequest]:
+def _gen_singleturn(cfg: WorkloadConfig, tokenizer, rng: Random) -> list[BenchRequest]:
     trace = _trace_name(cfg)
-    dataset = _sharegpt_file(cfg)
-    pairs = _sharegpt_pairs(dataset, tokenizer, cfg) if dataset.is_file() else []
+    dataset = _real_trace_file(cfg)
+    pairs = _real_trace_pairs(dataset, tokenizer, cfg) if dataset.is_file() else []
+    if pairs:
+        logger.info(
+            "workload %s: sampling %d conversations from the real trace at %s; these requests "
+            "are dataset-derived, so a synthetic_ name prefix no longer describes them",
+            cfg.name,
+            len(pairs),
+            dataset,
+        )
+    else:
+        logger.warning(
+            "workload %s: no usable conversation trace at %s, SYNTHESIZING prompt and output "
+            "lengths from the seeded lognormal sampler instead. These requests are not the "
+            "ShareGPT dataset and results from them must not be labeled ShareGPT.",
+            cfg.name,
+            dataset,
+        )
     requests: list[BenchRequest] = []
     now = 0.0
     for i in range(cfg.num_requests):
@@ -412,8 +441,8 @@ def _gen_agent(cfg: WorkloadConfig, tokenizer, rng: Random) -> list[BenchRequest
 def generate(cfg: WorkloadConfig, tokenizer) -> list[BenchRequest]:
     """Deterministically generate the request trace for one workload configuration."""
     rng = Random(cfg.seed)
-    if cfg.kind == "sharegpt":
-        return _gen_sharegpt(cfg, tokenizer, rng)
+    if cfg.kind == "singleturn":
+        return _gen_singleturn(cfg, tokenizer, rng)
     if cfg.kind in ("agent", "ablation"):
         return _gen_agent(cfg, tokenizer, rng)
     raise ValueError(f"unknown workload kind {cfg.kind!r}")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import logging
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
@@ -31,7 +32,7 @@ def first_of_kind(kind: str) -> WorkloadConfig:
 
 def test_generate_is_deterministic():
     tokenizer = HashWordTokenizer()
-    for base in (first_of_kind("sharegpt"), first_of_kind("agent")):
+    for base in (first_of_kind("singleturn"), first_of_kind("agent")):
         cfg = replace(base, num_requests=12)
         one = generate(cfg, tokenizer)
         two = generate(cfg, tokenizer)
@@ -48,13 +49,25 @@ def test_workload_matrix_shape():
     names = [cfg.name for cfg in WORKLOADS]
     assert len(names) == len(set(names))
     kinds = {cfg.kind for cfg in WORKLOADS}
-    assert kinds == {"sharegpt", "agent", "ablation"}
+    assert kinds == {"singleturn", "agent", "ablation"}
     for cfg in WORKLOADS:
         assert isinstance(cfg.seed, int)
         assert cfg.num_requests > 0
         assert cfg.request_rate > 0
-    sharegpt_rates = {cfg.request_rate for cfg in WORKLOADS if cfg.kind == "sharegpt"}
-    assert len(sharegpt_rates) >= 3
+    singleturn_rates = {cfg.request_rate for cfg in WORKLOADS if cfg.kind == "singleturn"}
+    assert len(singleturn_rates) >= 3
+
+
+def test_no_workload_claims_a_dataset_the_repo_does_not_ship():
+    # The shipped matrix has no real conversation trace on disk, so no workload name
+    # or kind may imply one. Renaming a config back to sharegpt means shipping the
+    # dataset and rerunning; until then this guard keeps the published labels honest.
+    for cfg in WORKLOADS:
+        assert "sharegpt" not in cfg.name.lower(), cfg.name
+        assert "sharegpt" not in cfg.kind.lower(), cfg.name
+    assert {cfg.name for cfg in WORKLOADS if cfg.kind == "singleturn"} == {
+        f"synthetic_singleturn_r{rate:g}" for rate in (1, 2, 4, 8, 16)
+    }
 
 
 def test_ablation_pairs_differ_only_in_radix_enabled():
@@ -82,7 +95,7 @@ def test_ablation_pair_traces_are_identical():
     assert generate(on, tokenizer) == generate(off, tokenizer)
 
 
-def test_sharegpt_samples_local_trace_when_present(tmp_path):
+def test_singleturn_samples_the_real_trace_when_the_file_is_present(tmp_path, caplog):
     data = [
         {
             "conversations": [
@@ -101,19 +114,42 @@ def test_sharegpt_samples_local_trace_when_present(tmp_path):
     trace_path = tmp_path / "sharegpt.json"
     trace_path.write_text(json.dumps(data), encoding="utf-8")
     cfg = replace(
-        first_of_kind("sharegpt"),
-        name="sharegpt_local_trace",
+        first_of_kind("singleturn"),
+        name="singleturn_local_trace",
         num_requests=6,
         prompt_len_min=1,
         prompt_len_max=64,
-        sharegpt_path=str(trace_path),
+        real_trace_path=str(trace_path),
     )
     tokenizer = HashWordTokenizer()
-    requests = generate(cfg, tokenizer)
+    with caplog.at_level(logging.DEBUG, logger="clockwork.bench.workloads"):
+        requests = generate(cfg, tokenizer)
     allowed = {"alpha beta gamma delta", "epsilon zeta"}
     assert len(requests) == 6
+    # Every prompt is verbatim trace text, so the synthetic sampler was not used.
     assert {r.messages[0]["content"] for r in requests} <= allowed
     assert generate(cfg, tokenizer) == requests
+    assert not [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+    assert any("real trace" in rec.getMessage() for rec in caplog.records)
+
+
+def test_singleturn_warns_loudly_when_the_real_trace_is_absent(tmp_path, caplog):
+    missing = tmp_path / "sharegpt.json"
+    cfg = replace(
+        first_of_kind("singleturn"),
+        name="singleturn_missing_trace",
+        num_requests=4,
+        real_trace_path=str(missing),
+    )
+    with caplog.at_level(logging.WARNING, logger="clockwork.bench.workloads"):
+        requests = generate(cfg, tokenizer=HashWordTokenizer())
+    assert len(requests) == 4
+    warnings = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+    assert len(warnings) == 1, "the synthetic fallback must not be silent"
+    message = warnings[0].getMessage()
+    assert "SYNTHESIZING" in message
+    assert "must not be labeled ShareGPT" in message
+    assert str(missing) in message
 
 
 def test_summarize_matches_hand_computed_percentiles(tmp_path):
@@ -357,7 +393,7 @@ def test_plots_write_pngs_into_tmp_path(tmp_path, repo_root):
         values
         | {
             "workload": "sg1",
-            "kind": "sharegpt",
+            "kind": "singleturn",
             "request_rate": "1.0",
             "radix_enabled": "True",
             "seed": "101",
@@ -371,7 +407,7 @@ def test_plots_write_pngs_into_tmp_path(tmp_path, repo_root):
         values
         | {
             "workload": "sg2",
-            "kind": "sharegpt",
+            "kind": "singleturn",
             "request_rate": "2.0",
             "radix_enabled": "True",
             "seed": "102",

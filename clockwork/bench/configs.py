@@ -8,7 +8,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class WorkloadConfig:
     name: str
-    kind: str  # "sharegpt" | "agent" | "ablation"
+    kind: str  # "singleturn" | "agent" | "ablation"
     request_rate: float
     num_requests: int
     seed: int
@@ -32,14 +32,19 @@ class WorkloadConfig:
     # Ablation pairs share a trace_name (empty means use name) so both runs
     # replay a byte-identical request list.
     trace_name: str = ""
-    # Empty means the default data/sharegpt.json at the repo root.
-    sharegpt_path: str = ""
+    # Real single-turn conversation trace. Empty means the default data/sharegpt.json
+    # at the repo root; when that file is missing the generator synthesizes lengths
+    # from the seeded sampler instead and warns that it did so.
+    real_trace_path: str = ""
 
 
-def _sharegpt(rate: float, seed: int) -> WorkloadConfig:
+def _synthetic_singleturn(rate: float, seed: int) -> WorkloadConfig:
+    # Named synthetic_ because no benchmark run of this repository has had
+    # data/sharegpt.json on disk, so these configs have only ever produced sampler
+    # output. Drop the prefix only after shipping the real trace and rerunning.
     return WorkloadConfig(
-        name=f"sharegpt_r{rate:g}",
-        kind="sharegpt",
+        name=f"synthetic_singleturn_r{rate:g}",
+        kind="singleturn",
         request_rate=rate,
         num_requests=128,
         seed=seed,
@@ -83,11 +88,12 @@ def _ablation(radix_enabled: bool, rate: float, seed: int) -> WorkloadConfig:
 
 
 WORKLOADS: list[WorkloadConfig] = [
-    _sharegpt(1.0, seed=101),
-    _sharegpt(2.0, seed=102),
-    _sharegpt(4.0, seed=103),
-    _sharegpt(8.0, seed=104),
-    _sharegpt(16.0, seed=105),
+    _synthetic_singleturn(1.0, seed=101),
+    _synthetic_singleturn(2.0, seed=102),
+    _synthetic_singleturn(4.0, seed=103),
+    _synthetic_singleturn(8.0, seed=104),
+    _synthetic_singleturn(16.0, seed=105),
+    # The agent traces below are self-designed by this project, not a public dataset.
     _agent(1024, 4, 8, 64, "poisson", 2.0, seed=201),
     _agent(1024, 4, 8, 64, "poisson", 4.0, seed=202),
     _agent(1024, 4, 8, 64, "poisson", 8.0, seed=203),

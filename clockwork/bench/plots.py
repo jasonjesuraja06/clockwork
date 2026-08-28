@@ -34,7 +34,7 @@ def _by_rate_mean(rows: list[dict], key: str) -> tuple[list[float], list[float]]
 
 def _latency_figure(rows: list[dict], p50_key: str, p99_key: str, ylabel: str, path: Path) -> Path:
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    for kind in ("sharegpt", "agent"):
+    for kind in ("singleturn", "agent"):
         kind_rows = [row for row in rows if row["kind"] == kind]
         if not kind_rows:
             continue
@@ -55,7 +55,7 @@ def _latency_figure(rows: list[dict], p50_key: str, p99_key: str, ylabel: str, p
 
 def _throughput_figure(rows: list[dict], path: Path) -> Path:
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    for kind in ("sharegpt", "agent"):
+    for kind in ("singleturn", "agent"):
         kind_rows = [row for row in rows if row["kind"] == kind]
         if not kind_rows:
             continue
@@ -102,7 +102,7 @@ def plot_all(summary_csv: str | Path, out_dir: str | Path = "docs/figures") -> l
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    rate_rows = [row for row in rows if row["kind"] in ("sharegpt", "agent")]
+    rate_rows = [row for row in rows if row["kind"] in ("singleturn", "agent")]
     if rate_rows:
         written.append(
             _latency_figure(
