@@ -20,8 +20,10 @@ Read this before the tables. Three facts qualify every measurement on this page.
    were not sampled from the ShareGPT dataset. The benchmark host had no `data/sharegpt.json`,
    so the generator took its synthetic fallback path for every published run. Earlier revisions
    of this file labeled those rows `sharegpt`, which was wrong; the workloads were renamed to say
-   what was actually measured. The raw CSVs attached to the GitHub release predate the rename and
-   still carry the old `sharegpt_r*` filenames, since they are the unedited output of that run.
+   what was actually measured. The raw CSVs and figures attached to the GitHub release predate the
+   rename and still carry the old `sharegpt_r*` names, since they are the unedited output of that
+   run. The figures in `docs/figures/` were redrawn from those same CSVs with the legend corrected
+   and no plotted value changed.
 2. The agent traces are self-designed by this project. They are not a public dataset and not a
    captured production trace. They model agent-loop traffic as one long shared system-plus-tools
    prefix followed by short per-turn suffixes, which is precisely the structure clockwork's radix
@@ -187,8 +189,14 @@ reason and continues, and no substitute numbers are reported.
 
 ## Reproducing
 
-`notebooks/bench_t4.ipynb` reproduces every number above on a free Colab T4 without code
-changes. The underlying commands:
+`notebooks/bench_t4.ipynb` runs the whole matrix on a free Colab T4 without code changes.
+The agent and ablation rows above reproduce as they stand. The five single-turn rows do
+not: section 4c of that notebook downloads the real ShareGPT dump, records its sha256, and
+replays one workload to check the prompts came from it, so on a fresh run those workloads
+sample the dataset instead of the sampler. Their numbers will differ from this page, and
+their rows must then be renamed off the `synthetic_` prefix, which the notebook prints. If
+the download or the replay check fails, the notebook says so loudly, the sampler is used,
+and the synthetic label stands. The underlying commands:
 
 ```
 uv run python scripts/serve.py --config configs/qwen2.5-1.5b-instruct.yaml
@@ -199,9 +207,9 @@ uv run python scripts/run_bench.py --configs all --base-url http://127.0.0.1:800
 The radix-off ablations need the server relaunched with `--set enable_prefix_cache=false`.
 Figures for both engines are in `docs/figures/`.
 
-To measure real single-turn traffic instead of the sampler, put the ShareGPT dataset at
-`data/sharegpt.json` before running: a JSON list of records with a `conversations` array of
+Outside the notebook, get the same effect by putting the dataset at `data/sharegpt.json`
+before running: a JSON list of records with a `conversations` array of
 `{"from": ..., "value": ...}` turns, which is what `_real_trace_pairs` parses. The generator
 then samples it and logs that it did so, and the `singleturn` rows become dataset-derived and
-should be renamed off the `synthetic_` prefix. Without that file the generator warns and
-synthesizes lengths, and the rows must keep the synthetic label.
+should be renamed off the `synthetic_` prefix. Without that file the generator warns on stderr
+and synthesizes lengths, and the rows must keep the synthetic label.

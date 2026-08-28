@@ -5,9 +5,9 @@ cache behind an OpenAI-compatible API.
 
 [![ci](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonjesuraja06/clockwork/actions/workflows/ci.yml)
 
-Measured on a Tesla T4: 1.17x to 2.38x vLLM output throughput on 12 self-designed synthetic agent
-traces, p99 ttft down 77% from the prefix cache, 8.3x peak Triton speedup, greedy decoding
-token-exact vs Hugging Face.
+Measured on a Tesla T4 by this repo's own harness: 1.17x to 2.38x vLLM output throughput on 12
+self-designed synthetic agent traces, p99 ttft down 77% from the prefix cache, 8.3x peak Triton
+speedup, greedy decoding token-exact vs Hugging Face.
 
 ## Motivation
 
