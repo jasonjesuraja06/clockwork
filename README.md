@@ -11,13 +11,12 @@ kernel speedup, and greedy decoding token-exact against the Hugging Face referen
 
 ## Motivation
 
-Agent loops resend the same system prompt, tool schemas, and conversation history on
-every turn, so most prompt tokens reaching the server carry KV that was already computed.
-Continuous batching keeps the device busy across requests of very different lengths,
-paged KV storage turns cache memory into a pool of fixed-size blocks that can be shared
-and reclaimed per block, and a radix prefix cache resolves the repeated prefix to a
-block-table lookup instead of a prefill. The combination targets time to first token on
-exactly the traffic agents generate.
+Agent loops resend the same system prompt, tool schemas, and conversation history on every
+turn, so most prompt tokens reaching the server carry KV that was already computed.
+Continuous batching keeps the device busy across requests of very different lengths, paged
+KV storage turns cache memory into a pool of fixed-size blocks that can be shared and
+reclaimed per block, and a radix prefix cache resolves the repeated prefix to a block-table
+lookup instead of a prefill, targeting time to first token on exactly that traffic.
 
 ## Architecture
 
@@ -54,8 +53,7 @@ Correctness, measured on the build host (float32, cpu):
 | paged decode vs dense attention, max abs diff | 2.05e-07 |
 | Qwen2.5-1.5B-Instruct greedy decoding vs Hugging Face | PASS, exact token match |
 
-Performance, measured on a Tesla T4 (float16, CUDA 12.8) by a top to bottom run of
-`notebooks/bench_t4.ipynb`:
+Performance, measured on a Tesla T4 (float16, CUDA 12.8) by `notebooks/bench_t4.ipynb`:
 
 | measurement | value |
 | --- | --- |
