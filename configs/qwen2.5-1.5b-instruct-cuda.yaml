@@ -1,0 +1,39 @@
+# CUDA profile for a 16 GB card. The sibling qwen2.5-1.5b-instruct.yaml stays
+# float32 on cpu because it is the correctness default; this one is the serving
+# default on a GPU host.
+model:
+  model: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: float16
+  device: cuda
+  max_model_len: 4096
+  seed: 0
+cache:
+  block_size: 16
+  num_blocks: 16384
+  enable_prefix_cache: true
+  watermark: 0.01
+scheduler:
+  max_num_seqs: 64
+  max_num_batched_tokens: 4096
+  max_model_len: 4096
+  preemption_mode: recompute
+# auto resolves to the Triton paged-decode kernel when CUDA and Triton are both
+# present, and falls back to the torch backend otherwise.
+attention_backend: auto
+#
+# num_blocks arithmetic, from this checkpoint's real shape (28 layers,
+# 2 kv heads, head_dim 128) at block_size 16 in float16:
+#
+#   bytes per block = 2 (K and V) * 28 layers * 16 tokens * 2 kv heads
+#                     * 128 head_dim * 2 bytes = 458,752 B = 448 KiB
+#
+# 16384 blocks * 448 KiB = 7.0 GiB of KV pool. That is sized to the scheduler's
+# own ceiling rather than to the card: max_num_seqs 64 * max_model_len 4096 =
+# 262,144 tokens = 16384 blocks, so 64 sequences can all reach the context limit
+# without the block manager ever preempting for lack of blocks. Adding blocks
+# past this point buys nothing at these scheduler settings.
+#
+# Fit on a 16 GB card: 7.0 GiB KV + 2.88 GiB float16 weights (the published
+# checkpoint is 3,087,467,144 bytes) = 9.9 GiB, leaving about 6 GiB for
+# activations, the CUDA context, and the Triton workspace. On a 24 GB card raise
+# max_num_seqs and num_blocks together, since the ceiling above is what binds.
