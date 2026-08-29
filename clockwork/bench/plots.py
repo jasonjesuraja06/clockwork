@@ -13,6 +13,22 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
+# Okabe-Ito, safe for deuteranopia and protanopia; no red/green pair.
+BLUE = "#0072B2"
+ORANGE = "#E69F00"
+GRAY = "#595959"
+
+# One hue per workload family, one line style per percentile, so four series
+# need only two colors and the palette stays colorblind-safe.
+KIND_COLOR = {"singleturn": BLUE, "agent": ORANGE}
+KIND_TEXT = {"singleturn": BLUE, "agent": "#8A6100"}
+
+
+def _title(fig, ax, headline: str, subtitle: str) -> None:
+    """One bold takeaway line above a smaller line of scope."""
+    fig.suptitle(headline, fontsize=12.5, fontweight="bold")
+    ax.set_title(subtitle, fontsize=9, color=GRAY)
+
 
 def _read_summary(summary_csv: str | Path) -> list[dict]:
     with Path(summary_csv).open(newline="", encoding="utf-8") as f:
@@ -33,42 +49,134 @@ def _by_rate_mean(rows: list[dict], key: str) -> tuple[list[float], list[float]]
     return rates, [sum(grouped[rate]) / len(grouped[rate]) for rate in rates]
 
 
-def _latency_figure(rows: list[dict], p50_key: str, p99_key: str, ylabel: str, path: Path) -> Path:
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+def _latency_figure(
+    rows: list[dict], p50_key: str, p99_key: str, ylabel: str, label: str, path: Path
+) -> Path:
+    # Log y: p99 runs an order of magnitude above p50 at the loaded rates, so a
+    # linear axis flattens every p50 series onto the baseline.
+    fig, ax = plt.subplots(figsize=(8.6, 5.0))
+    rate_span: list[float] = []
+    worst: tuple[float, str, float, float, float] | None = None
     for kind in ("singleturn", "agent"):
         kind_rows = [row for row in rows if row["kind"] == kind]
         if not kind_rows:
             continue
-        for key, style in ((p50_key, "-o"), (p99_key, "--s")):
+        color = KIND_COLOR[kind]
+        series = {}
+        for key, style, marker in ((p50_key, "-", "o"), (p99_key, "--", "s")):
             rates, means = _by_rate_mean(kind_rows, key)
-            label = f"{kind} {key.split('_')[-2]}"
-            ax.plot(rates, means, style, label=label)
-    ax.set_xlabel("request rate (req/s)")
-    ax.set_ylabel(ylabel)
+            series[key] = (rates, means)
+            rate_span += rates
+            ax.plot(
+                rates,
+                means,
+                style,
+                marker=marker,
+                color=color,
+                linewidth=2.0,
+                markersize=5.5,
+                label=f"{kind} {key.split('_')[-2]}",
+                zorder=3,
+            )
+            # The endpoint carries its own value, so the reader never has to
+            # trace a marker back to the axis.
+            ax.annotate(
+                f"{means[-1]:.0f}",
+                xy=(rates[-1], means[-1]),
+                xytext=(6, 0),
+                textcoords="offset points",
+                va="center",
+                ha="left",
+                fontsize=9,
+                fontweight="bold",
+                color=KIND_TEXT[kind],
+                zorder=5,
+            )
+        # Where the tail is furthest from the median: the point of the figure.
+        p50_rates, p50_means = series[p50_key]
+        p99_by_rate = dict(zip(*series[p99_key], strict=True))
+        for rate, p50 in zip(p50_rates, p50_means, strict=True):
+            p99 = p99_by_rate.get(rate)
+            if not p99 or not p50:
+                continue
+            if worst is None or p99 / p50 > worst[0]:
+                worst = (p99 / p50, kind, rate, p50, p99)
+
+    ax.set_xlabel("request rate (req/s, log scale)")
+    ax.set_ylabel(f"{ylabel}, log scale")
     ax.set_xscale("log", base=2)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
+    ax.set_yscale("log")
+    if rate_span:
+        ax.set_xlim(min(rate_span) * 0.82, max(rate_span) * 2.15)
+    ax.grid(True, alpha=0.3, which="both", zorder=0)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False, fontsize=9.5, loc="upper left")
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    if worst:
+        ratio, kind, rate, p50, p99 = worst
+        _title(
+            fig,
+            ax,
+            f"{label}: the p99 tail reaches {ratio:.0f}x the p50 median,"
+            f" so the median hides the tail",
+            f"Widest gap at {kind} {rate:g} req/s: p99 {p99:.0f} ms against p50 {p50:.0f} ms."
+            " Solid is p50, dashed is p99; endpoints carry their value in ms.",
+        )
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
 def _throughput_figure(rows: list[dict], path: Path) -> Path:
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(8.6, 5.0))
+    peaks = []
     for kind in ("singleturn", "agent"):
         kind_rows = [row for row in rows if row["kind"] == kind]
         if not kind_rows:
             continue
         rates, means = _by_rate_mean(kind_rows, "output_tok_s")
-        ax.plot(rates, means, "-o", label=kind)
-    ax.set_xlabel("request rate (req/s)")
-    ax.set_ylabel("output tokens per second")
+        ax.plot(
+            rates,
+            means,
+            "-o",
+            color=KIND_COLOR[kind],
+            linewidth=2.2,
+            markersize=6,
+            label=kind,
+            zorder=3,
+        )
+        for rate, value in zip(rates, means, strict=True):
+            ax.annotate(
+                f"{value:.0f}",
+                xy=(rate, value),
+                xytext=(0, 7),
+                textcoords="offset points",
+                ha="center",
+                fontsize=9,
+                fontweight="bold",
+                color=KIND_TEXT[kind],
+                zorder=5,
+            )
+        best = max(range(len(means)), key=lambda i: means[i])
+        peaks.append(f"{kind} peaks at {means[best]:.0f} tok/s at {rates[best]:g} req/s")
+
+    ax.set_xlabel("request rate (req/s, log scale)")
+    ax.set_ylabel("output tokens per second, higher is better")
     ax.set_xscale("log", base=2)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
+    ax.grid(True, alpha=0.3, zorder=0)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False, fontsize=9.5, loc="upper left")
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    if peaks:
+        _title(
+            fig,
+            ax,
+            "Output throughput: " + "; ".join(peaks),
+            "Mean of the runs at each rate. Every point carries its value in output tok/s.",
+        )
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -81,7 +189,14 @@ def _median_by_rate(rows: list[dict]) -> dict[float, dict]:
     return {
         rate: {
             key: median([row[key] for row in group])
-            for key in ("ttft_p50_ms", "ttft_p99_ms", "itl_p50_ms", "itl_p99_ms", "output_tok_s")
+            for key in (
+                "ttft_p50_ms",
+                "ttft_p99_ms",
+                "itl_p50_ms",
+                "itl_p99_ms",
+                "output_tok_s",
+                "hit_rate",
+            )
         }
         for rate, group in grouped.items()
     }
@@ -95,9 +210,12 @@ def _ablation_figure(rows: list[dict], path: Path) -> Path:
     rates = sorted({row["request_rate"] for row in rows})
     fig, (ax_ttft, ax_tok) = plt.subplots(1, 2, figsize=(9, 4.6))
     width = 0.35
+    # The legend names the workload's `radix_enabled` flag, not an engine
+    # state: whether the engine honored the flag is a separate measurement,
+    # and the footnote below reports it from the recorded hit rate.
     variants = (
-        (-width / 2, "True", "radix on", "#0072B2"),
-        (width / 2, "False", "radix off", "#E69F00"),
+        (-width / 2, "True", "prefix cache flag on", BLUE),
+        (width / 2, "False", "flag off", ORANGE),
     )
     by_variant: dict[str, dict[float, dict]] = {}
     for offset, enabled, label, color in variants:
@@ -132,10 +250,25 @@ def _ablation_figure(rows: list[dict], path: Path) -> Path:
         top=max(row["ttft_p50_ms"] for row in rows) * 4.0,
     )
     ax_tok.set_ylim(top=max(row["output_tok_s"] for row in rows) * 1.22)
+    # A run where the flag-off rows still report a high prefix hit rate is not
+    # an ablation of prefix caching: the engine kept its own cache on. That is
+    # true of the vLLM sweep, so the figure has to say it rather than leave the
+    # legend implying an engine setting the CSV contradicts.
+    hit_on = median([subset["hit_rate"] for subset in on.values()]) if on else 0.0
+    hit_off = median([subset["hit_rate"] for subset in off.values()]) if off else 0.0
+    note = (
+        f"Bars follow the workload's radix_enabled flag. Measured prefix hit rate:"
+        f" flag on {hit_on:.2f}, flag off {hit_off:.2f}."
+    )
+    if hit_off > 0.5:
+        note += (
+            "\nThe engine kept its own prefix cache on through the flag-off runs,"
+            " so these bars are not an ablation of prefix caching."
+        )
+    fig.text(0.5, -0.02, note, ha="center", va="top", fontsize=8.5, color=GRAY)
     if ratios:
-        # The label follows the workload's `radix_enabled` flag, the same column
-        # docs/results.md prints, so the title claims a measured ratio and not
-        # an engine behaviour the CSV cannot vouch for.
+        # The title claims a measured ratio between the two flag settings and
+        # not an engine behaviour the CSV cannot vouch for.
         fig.suptitle(
             f"Prefix cache flag on versus off, identical traces: output tok/s"
             f" {min(ratios):.2f}x to {max(ratios):.2f}x",
@@ -169,7 +302,12 @@ def plot_all(summary_csv: str | Path, out_dir: str | Path = "docs/figures") -> l
     if rate_rows:
         written.append(
             _latency_figure(
-                rate_rows, "ttft_p50_ms", "ttft_p99_ms", "ttft (ms)", out_dir / "ttft_vs_rate.png"
+                rate_rows,
+                "ttft_p50_ms",
+                "ttft_p99_ms",
+                "time to first token (ms)",
+                "Time to first token",
+                out_dir / "ttft_vs_rate.png",
             )
         )
         written.append(
@@ -178,6 +316,7 @@ def plot_all(summary_csv: str | Path, out_dir: str | Path = "docs/figures") -> l
                 "itl_p50_ms",
                 "itl_p99_ms",
                 "inter-token latency (ms)",
+                "Inter-token latency",
                 out_dir / "itl_vs_rate.png",
             )
         )

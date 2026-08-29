@@ -565,9 +565,7 @@ def _portfolio_results(root):
                     }
                 )
     (root / "microbench_decode.csv").write_text(
-        "batch,ctx_len,torch_ms,triton_ms,speedup\n"
-        "1,128,0.5,0.1,5.0\n"
-        "1,2048,0.5,0.625,0.8\n",
+        "batch,ctx_len,torch_ms,triton_ms,speedup\n1,128,0.5,0.1,5.0\n1,2048,0.5,0.625,0.8\n",
         encoding="utf-8",
     )
     request_defaults = {
