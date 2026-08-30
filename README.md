@@ -1,4 +1,4 @@
-# clockwork
+# Clockwork
 
 An LLM inference engine with continuous batching, a paged KV cache, and a radix prefix
 cache behind an OpenAI-compatible API.
